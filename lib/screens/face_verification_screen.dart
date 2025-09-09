@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -25,6 +26,21 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   void initState() {
     super.initState();
     _initCamera();
+  }
+
+  double _cosineSimilarity(List<double> a, List<double> b) {
+    final n = a.length;
+    if (b.length != n || n == 0) return 0.0;
+    double dot = 0.0, na = 0.0, nb = 0.0;
+    for (var i = 0; i < n; i++) {
+      final x = a[i];
+      final y = b[i];
+      dot += x * y;
+      na += x * x;
+      nb += y * y;
+    }
+    if (na == 0 || nb == 0) return 0.0;
+    return dot / (math.sqrt(na) * math.sqrt(nb));
   }
 
   Future<void> _initCamera() async {
@@ -62,7 +78,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       }
       setState(() => _message = 'Verifying identity...');
       final face = FaceService();
-      // Optional: quality check
+      // Process frame to get embedding and quality
       final processed = await face.processFace(imageBytes: bytes, liveness: false);
       if (!(processed.faceDetected)) {
         throw 'No face detected. Ensure your face is clearly visible.';
@@ -70,13 +86,23 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       if ((processed.qualityScore ?? 0.0) < 0.3) {
         throw 'Face quality too low. Improve lighting and try again.';
       }
-      final result = await face.verifyFace(imageBytes: bytes, email: email);
-      if (result.success && (result.matched ?? true)) {
-        setState(() => _message = 'Face verified successfully!');
+      if (processed.embedding.isEmpty) {
+        throw 'Unable to extract face embedding. Try again.';
+      }
+      // Fetch stored embedding from Supabase
+      final registered = await SupabaseService.instance.fetchFaceEmbedding();
+      if (registered == null || registered.isEmpty) {
+        throw 'No face registered for this account. Please enroll first.';
+      }
+      // Compare via cosine similarity
+      final sim = _cosineSimilarity(processed.embedding, registered);
+      const threshold = 0.60; // tune as needed
+      if (sim >= threshold) {
+        setState(() => _message = 'Face verified (similarity ${(sim * 100).toStringAsFixed(1)}%).');
         if (!mounted) return;
         Navigator.of(context).pop(true);
       } else {
-        throw result.message ?? 'Face verification failed';
+        throw 'Face does not match (similarity ${(sim * 100).toStringAsFixed(1)}%).';
       }
     } catch (e) {
       _show(e.toString());

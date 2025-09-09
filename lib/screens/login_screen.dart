@@ -12,14 +12,14 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _email = TextEditingController();
+  final _identifier = TextEditingController();
   final _password = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
 
   @override
   void dispose() {
-    _email.dispose();
+    _identifier.dispose();
     _password.dispose();
     super.dispose();
   }
@@ -28,7 +28,9 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
     try {
-      final email = _email.text.trim();
+      // Allow either email or username. Resolve to email if username provided.
+      final identifier = _identifier.text.trim();
+      final email = await SupabaseService.instance.resolveEmailForLogin(identifier);
       final pwd = _password.text;
       await SupabaseService.instance.signIn(email: email, password: pwd);
       await SupabaseService.instance.ensureUserRow(email: email);
@@ -40,6 +42,9 @@ class _LoginScreenState extends State<LoginScreen> {
         try {
           final rec = await client.from('users').select('admin').eq('id', user.id).maybeSingle();
           isAdmin = (rec != null && rec['admin'] == true);
+        } on PostgrestException {
+          // If the 'admin' column doesn't exist or is not accessible, default to false.
+          isAdmin = false;
         } catch (_) {}
       }
       if (!mounted) return;
@@ -102,10 +107,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           const Text('Sign In', textAlign: TextAlign.center, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFFdc2626))),
                           const SizedBox(height: 24),
                           TextFormField(
-                            controller: _email,
+                            controller: _identifier,
                             keyboardType: TextInputType.emailAddress,
-                            decoration: _dec('Enter your email').copyWith(hintText: 'Enter your email'),
-                            validator: (v) => (v == null || !v.contains('@')) ? 'Enter a valid email' : null,
+                            decoration: _dec('Email or username').copyWith(hintText: 'Enter your email or username'),
+                            validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter your email or username' : null,
                           ),
                           const SizedBox(height: 12),
                           TextFormField(

@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
@@ -7,26 +8,41 @@ import '../config/api.dart';
 class FaceService {
   final Dio _dio = Dio(BaseOptions(baseUrl: ApiConfig.faceServiceBaseUrl, connectTimeout: const Duration(seconds: 15), receiveTimeout: const Duration(seconds: 30)));
 
-  // Verify by sending an image and email (simple flow)
+  FaceService() {
+    // Enable basic logging to confirm traffic to the face-processing service
+    _dio.interceptors.add(LogInterceptor(
+      request: true,
+      requestBody: true,
+      responseBody: true,
+      responseHeader: false,
+      error: true,
+      requestHeader: false,
+    ));
+  }
+
+  // Verify: call the face processing endpoint to get an embedding.
+  // The Flask service does not implement /verify; instead we use /process-face.
+  // We treat detection as success; matched/confidence are left null for now.
   Future<FaceVerifyResult> verifyFace({required Uint8List imageBytes, required String email}) async {
     try {
-      final formData = FormData.fromMap({
-        'email': email,
-        'image': MultipartFile.fromBytes(
-          imageBytes,
-          filename: 'capture.jpg',
-        ),
-      });
-      final resp = await _dio.post('/verify', data: formData);
+      final b64 = base64Encode(imageBytes);
+      final resp = await _dio.post(
+        '/process-face',
+        data: {
+          'imageData': b64,
+          'returnFaceImage': false,
+        },
+      );
       final data = resp.data as Map<String, dynamic>;
+      final faceDetected = data['face_detected'] == true;
       return FaceVerifyResult(
-        success: data['success'] == true,
-        score: (data['score'] as num?)?.toDouble(),
-        message: data['message']?.toString(),
-        matched: data['matched'] == true,
-        confidence: (data['confidence'] as num?)?.toDouble(),
-        templateId: data['template_id']?.toString(),
-        userId: data['user_id']?.toString(),
+        success: faceDetected,
+        message: faceDetected ? 'Face captured' : (data['error']?.toString() ?? 'No face detected'),
+        matched: null,
+        confidence: null,
+        templateId: null,
+        userId: null,
+        score: null,
       );
     } catch (e) {
       return FaceVerifyResult(success: false, message: 'Face verification failed: $e');
@@ -36,11 +52,14 @@ class FaceService {
   // Process a face image to generate an embedding and quality report
   Future<FaceProcessResult> processFace({required Uint8List imageBytes, required bool liveness}) async {
     try {
-      final formData = FormData.fromMap({
-        'image': MultipartFile.fromBytes(imageBytes, filename: 'capture.jpg'),
-        'liveness': liveness,
-      });
-      final resp = await _dio.post('/process', data: formData);
+      final b64 = base64Encode(imageBytes);
+      final resp = await _dio.post(
+        '/process-face',
+        data: {
+          'imageData': b64,
+          'returnFaceImage': false,
+        },
+      );
       final data = resp.data as Map<String, dynamic>;
       return FaceProcessResult(
         faceDetected: data['face_detected'] == true,
@@ -52,13 +71,17 @@ class FaceService {
     }
   }
 
-  // Register a face embedding to a user id
+  // Register a face embedding to a user id via the same /process-face endpoint (mock)
   Future<bool> registerFace({required List<double> embedding, required String userId}) async {
     try {
-      final resp = await _dio.post('/register', data: {
-        'user_id': userId,
-        'embedding': embedding,
-      });
+      final resp = await _dio.post(
+        '/process-face',
+        data: {
+          'action': 'register',
+          'userId': userId,
+          'embedding': embedding,
+        },
+      );
       final data = resp.data as Map<String, dynamic>;
       return data['success'] == true;
     } catch (e) {
@@ -91,5 +114,18 @@ class FaceProcessResult {
   final double? qualityScore;
   final List<double> embedding;
   final String? message;
-  FaceProcessResult({required this.faceDetected, this.qualityScore, this.embedding = const [], this.message});
+  final List<int>? bbox; // [x, y, w, h]
+  final List<int>? imageSize; // [w, h]
+  final List<double>? centerOffset; // [dx, dy] normalized offsets
+  final double? boxRatio; // face box area / image area
+  FaceProcessResult({
+    required this.faceDetected,
+    this.qualityScore,
+    this.embedding = const [],
+    this.message,
+    this.bbox,
+    this.imageSize,
+    this.centerOffset,
+    this.boxRatio,
+  });
 }

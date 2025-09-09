@@ -6,5 +6,5 @@ class ApiConfig {
 
   // Endpoint of the Flask/ONNX Face Processing Service
   // Example: http://127.0.0.1:5001 or https://face.yourdomain.com
-  static const String faceServiceBaseUrl = "http://127.0.0.1:8001";
+  static const String faceServiceBaseUrl = "http://192.168.1.42:8001";
 }

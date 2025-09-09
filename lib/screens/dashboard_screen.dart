@@ -47,8 +47,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadFaceFlag() async {
     final prefs = await SharedPreferences.getInstance();
-    _hasFaceRegistered = prefs.getBool('has_face_registered') ?? false;
+    // Read cached flag first for fast UI
+    bool cached = prefs.getBool('has_face_registered') ?? false;
+    _hasFaceRegistered = cached;
     if (mounted) setState(() {});
+    // Verify with backend (source of truth)
+    try {
+      final emb = await SupabaseService.instance.fetchFaceEmbedding();
+      final has = (emb != null && emb.isNotEmpty);
+      _hasFaceRegistered = has;
+      if (mounted) setState(() {});
+      await prefs.setBool('has_face_registered', has);
+    } catch (_) {
+      // keep cached value on failure
+    }
   }
 
   Future<void> _loadUsername() async {
