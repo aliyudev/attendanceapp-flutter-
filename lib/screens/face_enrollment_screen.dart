@@ -28,7 +28,7 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
   double _progress = 0.0; // 0..1 for current step
   int _goodStreak = 0; // consecutive good frames
   final int _targetGoodStreak = 3; // require N consecutive good frames to accept a step
-  final double _qualityThreshold = 0.35; // minimum quality per frame
+  final double _qualityThreshold = 0.25; // minimum quality per frame
   bool _captureInFlight = false; // guard re-entrancy
   bool _disposed = false;
 
