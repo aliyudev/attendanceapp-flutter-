@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../services/face_service.dart';
 import '../services/supabase_service.dart';
+import '../config/constants.dart';
 
 class FaceEnrollmentScreen extends StatefulWidget {
   const FaceEnrollmentScreen({super.key});
@@ -28,9 +29,14 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
   double _progress = 0.0; // 0..1 for current step
   int _goodStreak = 0; // consecutive good frames
   final int _targetGoodStreak = 3; // require N consecutive good frames to accept a step
-  final double _qualityThreshold = 0.25; // minimum quality per frame
+  final double _qualityThreshold = FaceConstants.enrollmentQualityMin; // minimum quality per frame
   bool _captureInFlight = false; // guard re-entrancy
   bool _disposed = false;
+
+  // Debug/diagnostics
+  double? _lastQuality;
+  bool? _lastDetected;
+  String? _lastError;
 
   @override
   void initState() {
@@ -133,6 +139,13 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
       final bytes = await File(xfile.path).readAsBytes();
       final face = FaceService();
       final processed = await face.processFace(imageBytes: bytes, liveness: false);
+      // update diagnostics
+      setState(() {
+        _lastDetected = processed.faceDetected;
+        _lastQuality = processed.qualityScore;
+        _lastError = processed.message; // present only if failure
+      });
+
       if (!processed.faceDetected) {
         // reset streak if no face
         setState(() {
@@ -153,7 +166,9 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
       });
     } catch (e) {
       // transient errors: do not break the loop, but notify lightweight
-      // Optionally show toast once
+      setState(() {
+        _lastError = e.toString();
+      });
     } finally {
       _captureInFlight = false;
     }
@@ -247,6 +262,22 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
                               strokeWidth: 8,
                               color: const Color(0xFFdc2626),
                               backgroundColor: Colors.white24,
+                            ),
+                          ),
+                          Positioned(
+                            bottom: 12,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+                              child: DefaultTextStyle(
+                                style: const TextStyle(fontSize: 12, color: Colors.white),
+                                child: Column(
+                                  children: [
+                                    Text('Detected: ${_lastDetected == null ? '-' : (_lastDetected! ? 'yes' : 'no')}  |  Quality: ${_lastQuality?.toStringAsFixed(2) ?? '-'}'),
+                                    if (_lastError != null) Text('Err: ${_lastError}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.orangeAccent)),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ],

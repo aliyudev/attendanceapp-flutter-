@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../services/face_service.dart';
 import '../services/supabase_service.dart';
+import '../config/constants.dart';
 
 class FaceVerificationScreen extends StatefulWidget {
   const FaceVerificationScreen({super.key});
@@ -66,37 +67,53 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
     if (_busy || _captured) return;
     final ctrl = _controller;
     if (ctrl == null || !ctrl.value.isInitialized) return;
-    setState(() { _busy = true; _captured = true; _message = 'Capturing...'; });
+    setState(() { _busy = true; _captured = true; _message = 'Starting liveness check...'; });
     try {
-      final xfile = await ctrl.takePicture();
-      final bytes = await File(xfile.path).readAsBytes();
+      // Ensure logged in
       final email = SupabaseService.instance.currentUser?.email ?? '';
       if (email.isEmpty) {
         _show('Not authenticated');
         Navigator.of(context).pop(false);
         return;
       }
-      setState(() => _message = 'Verifying identity...');
+
       final face = FaceService();
-      // Process frame to get embedding and quality
-      final processed = await face.processFace(imageBytes: bytes, liveness: false);
-      if (!(processed.faceDetected)) {
-        throw 'No face detected. Ensure your face is clearly visible.';
+
+      // Step 1: Ask for LEFT head turn
+      setState(() => _message = 'Liveness: Turn your head LEFT');
+      await Future.delayed(const Duration(milliseconds: 400));
+      final leftFrame = await _captureAndProcess(face);
+      _ensureValidFrame(leftFrame);
+      final dxLeft = (leftFrame.centerOffset != null && leftFrame.centerOffset!.length >= 1) ? leftFrame.centerOffset![0] : 0.0;
+      const dxThreshold = FaceConstants.livenessDxThreshold; // movement threshold
+      if (!(dxLeft < -dxThreshold)) {
+        throw 'Please turn your head more to the LEFT.';
       }
-      if ((processed.qualityScore ?? 0.0) < 0.3) {
-        throw 'Face quality too low. Improve lighting and try again.';
+
+      // Step 2: Ask for RIGHT head turn
+      setState(() => _message = 'Liveness: Turn your head RIGHT');
+      await Future.delayed(const Duration(milliseconds: 400));
+      final rightFrame = await _captureAndProcess(face);
+      _ensureValidFrame(rightFrame);
+      final dxRight = (rightFrame.centerOffset != null && rightFrame.centerOffset!.length >= 1) ? rightFrame.centerOffset![0] : 0.0;
+      if (!(dxRight > dxThreshold)) {
+        throw 'Please turn your head more to the RIGHT.';
       }
-      if (processed.embedding.isEmpty) {
-        throw 'Unable to extract face embedding. Try again.';
+
+      // Proceed with verification using the right frame embedding (more frontal after motion is acceptable too)
+      if (rightFrame.embedding.isEmpty) {
+        throw 'Unable to extract face embedding from the frame. Try again.';
       }
+
       // Fetch stored embedding from Supabase
       final registered = await SupabaseService.instance.fetchFaceEmbedding();
       if (registered == null || registered.isEmpty) {
         throw 'No face registered for this account. Please enroll first.';
       }
-      // Compare via cosine similarity
-      final sim = _cosineSimilarity(processed.embedding, registered);
-      const threshold = 0.60; // tune as needed
+
+      setState(() => _message = 'Verifying identity...');
+      final sim = _cosineSimilarity(rightFrame.embedding, registered);
+      const threshold = FaceConstants.verificationSimilarityMin;
       if (sim >= threshold) {
         setState(() => _message = 'Face verified (similarity ${(sim * 100).toStringAsFixed(1)}%).');
         if (!mounted) return;
@@ -109,6 +126,22 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       if (mounted) {
         setState(() { _busy = false; _captured = false; _message = 'Position your face in the guide'; });
       }
+    }
+  }
+
+  Future<FaceProcessResult> _captureAndProcess(FaceService face) async {
+    final ctrl = _controller!;
+    final xfile = await ctrl.takePicture();
+    final bytes = await File(xfile.path).readAsBytes();
+    return await face.processFace(imageBytes: bytes, liveness: true);
+  }
+
+  void _ensureValidFrame(FaceProcessResult processed) {
+    if (!(processed.faceDetected)) {
+      throw 'No face detected. Ensure your face is clearly visible.';
+    }
+    if ((processed.qualityScore ?? 0.0) < FaceConstants.verificationQualityMin) {
+      throw 'Face quality too low. Improve lighting and try again.';
     }
   }
 

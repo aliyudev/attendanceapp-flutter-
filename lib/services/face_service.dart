@@ -65,6 +65,10 @@ class FaceService {
         faceDetected: data['face_detected'] == true,
         qualityScore: (data['quality_score'] as num?)?.toDouble(),
         embedding: (data['embedding'] as List?)?.map((e) => (e as num).toDouble()).toList() ?? const [],
+        bbox: (data['bbox'] as List?)?.map((e) => (e as num).toInt()).toList(),
+        imageSize: (data['image_size'] as List?)?.map((e) => (e as num).toInt()).toList(),
+        centerOffset: (data['center_offset'] as List?)?.map((e) => (e as num).toDouble()).toList(),
+        boxRatio: (data['box_ratio'] as num?)?.toDouble(),
       );
     } catch (e) {
       return FaceProcessResult(faceDetected: false, message: 'Face processing failed: $e');
